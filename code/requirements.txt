@@ -1,4 +1,4 @@
-sentry-sdk=2.0.4
+sentry-sdk==2.0.4
 python-dateutil
 ciso8601
 amqp==5.1.1

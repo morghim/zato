@@ -420,22 +420,16 @@ def run(base_dir:'str', start_gunicorn_app:'bool'=True, options:'dictnone'=None)
     dsn = sentry_config.pop('dsn', None)
     if dsn:
 
-        from raven import Client
-        from raven.handlers.logging import SentryHandler
+        import sentry_sdk
 
-        handler_level = sentry_config.pop('level')
-        client = Client(dsn, **sentry_config)
+        sentry_sdk.init(
+        dsn=dsn,
 
-        handler = SentryHandler(client=client)
-        handler.setLevel(getattr(logging, handler_level))
-
-        logger = logging.getLogger('')
-        logger.addHandler(handler)
-
-        for name in logging.Logger.manager.loggerDict:
-            if name.startswith('zato'):
-                logger = logging.getLogger(name)
-                logger.addHandler(handler)
+        # Set traces_sample_rate to 1.0 to capture 100%
+        # of transactions for performance monitoring.
+        # We recommend adjusting this value in production.
+        traces_sample_rate=1.0
+        )
 
     if asbool(profiler_enabled):
 

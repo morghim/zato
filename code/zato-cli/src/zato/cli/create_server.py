@@ -49,6 +49,8 @@ gunicorn_graceful_timeout=1
 debugger_enabled=False
 debugger_host=0.0.0.0
 debugger_port=5678
+ipc_host=127.0.0.1
+ipc_port_start=17050
 
 work_dir=../../work
 
@@ -417,7 +419,7 @@ about_to_expire_threshold=30 # In days
 log_in_if_about_to_expire=True
 min_length=8
 max_length=256
-min_complexity=4
+min_complexity=0
 min_complexity_algorithm=zxcvbn
 reject_list = """
   111111

@@ -1,3 +1,6 @@
+sentry-sdk=2.0.4
+python-dateutil
+ciso8601
 amqp==5.1.1
 apispec==5.1.1
 arrow==0.4.2
@@ -168,4 +171,3 @@ pysimdjson==5.0.2; sys_platform == 'linux'
 pysolr==3.9.0; sys_platform == 'linux'
 python-ldap==3.4.0; sys_platform == 'linux'
 pywin32==305; platform_system == "Windows"
-sentry-sdk=2.0.4

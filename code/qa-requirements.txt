@@ -10,3 +10,5 @@ types-markdown
 types-pyyaml
 types-ujson
 yapf
+sentry-sdk==2.0.4
+

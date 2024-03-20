@@ -152,7 +152,7 @@ class FileTransferEventHandler:
             event.channel_name = self.channel_name
 
             if self.config.is_hot_deploy:
-                if transfer_event.is_directory:
+                if hasattr(transfer_event, 'is_directory') and transfer_event.is_directory:
                     if isinstance(transfer_event, DirCreatedEvent):
                         logger.info('About to add a new hot-deployment directory -> %s', event.full_path)
                         self.manager.add_pickup_dir(event.full_path, f'File transfer -> {self.channel_name}')

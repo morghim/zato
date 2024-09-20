@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Copyright (C) 2023, Zato Source s.r.o. https://zato.io
+Copyright (C) 2024, Zato Source s.r.o. https://zato.io
 
 Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 """
@@ -10,6 +10,7 @@ Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 import os
 from datetime import datetime
 from logging import getLogger
+from sys import maxsize
 from traceback import format_exc
 
 # gevent
@@ -20,8 +21,10 @@ from watchdog.events import DirCreatedEvent, DirModifiedEvent, FileCreatedEvent,
 
 # Zato
 from zato.common.api import FILE_TRANSFER
+from zato.common.typing_ import cast_
 from zato.common.util.api import spawn_greenlet
 from zato.common.util.file_transfer import path_string_list_to_list
+from zato.server.file_transfer.common import source_type_to_snapshot_maker_class
 from zato.server.file_transfer.snapshot import default_interval, DirSnapshotDiff
 
 # ################################################################################################################################
@@ -33,7 +36,7 @@ if 0:
     from zato.server.file_transfer.snapshot import BaseRemoteSnapshotMaker
 
     Bunch = Bunch
-    BaseRemoteSnapshotMaker
+    BaseRemoteSnapshotMaker = BaseRemoteSnapshotMaker
     FileTransferAPI = FileTransferAPI
 
 # ################################################################################################################################
@@ -109,6 +112,10 @@ class BaseObserver:
 
     def _start(self, observer_start_args:'any_') -> 'None':
 
+        snapshot_maker = source_type_to_snapshot_maker_class[self.source_type]
+        snapshot_maker = cast_('BaseRemoteSnapshotMaker', snapshot_maker)
+        snapshot_maker.connect()
+
         for path in self.path_list:
 
             # Start only for paths that are valid - all invalid ones
@@ -116,7 +123,7 @@ class BaseObserver:
             if self.is_path_valid(path):
                 logger.info('Starting %s file observer `%s` for `%s` (%s)',
                     self.observer_type_name, path, self.name, self.observer_type_impl)
-                _ = spawn_greenlet(self._observe_func, path, observer_start_args)
+                _ = spawn_greenlet(self._observe_func, snapshot_maker, path, maxsize, True, observer_start_args)
             else:
                 logger.info('Skipping invalid path `%s` for `%s` (%s)', path, self.name, self.observer_type_impl)
 
@@ -143,7 +150,7 @@ class BaseObserver:
 
 # ################################################################################################################################
 
-    def get_dir_snapshot(path, is_recursive:'bool') -> 'str':
+    def get_dir_snapshot(path, is_recursive:'bool') -> 'str': # type: ignore
         """ Returns an implementation-specific snapshot of a directory.
         """
         raise NotImplementedError()
@@ -247,7 +254,7 @@ class BaseObserver:
         self,
         snapshot_maker,      # type: BaseRemoteSnapshotMaker
         path,                # type: str
-        max_iters,           # type: int
+        max_iters=maxsize,   # type: int
         log_stop_event=True, # type: bool
         *args,               # type: any_
         **kwargs             # type: any_
@@ -336,7 +343,7 @@ class BaseObserver:
                     # will be triggered from the scheduler and we treat the scheduler job's interval
                     # as the sleep time.
                     if self.is_local:
-                        sleep(timeout)
+                        sleep(timeout) # type: ignore
 
         except Exception:
             logger.warning('Exception in %s file observer `%s` e:`%s (%s t:%s)',

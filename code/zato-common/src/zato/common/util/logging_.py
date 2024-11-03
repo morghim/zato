@@ -7,6 +7,7 @@ Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 """
 
 # stdlib
+import os
 from logging import Formatter
 
 # Zato
@@ -112,20 +113,20 @@ handlers:
         class: {log_handler_class}
         filename: './logs/server.log'
         mode: 'a'
-        maxBytes: 20000000
-        backupCount: 10
+        maxBytes: {server_log_max_size}
+        backupCount: {server_log_backup_count}
         encoding: 'utf8'
     stdout:
         formatter: colour
         class: logging.StreamHandler
         stream: ext://sys.stdout
     http_access_log:
-        formatter: http_access_log
+        formatter: default
         class: {log_handler_class}
         filename: './logs/http_access.log'
         mode: 'a'
-        maxBytes: 20000000
-        backupCount: 10
+        maxBytes: {server_log_max_size}
+        backupCount: {server_log_backup_count}
         encoding: 'utf8'
     admin:
         formatter: default
@@ -172,24 +173,24 @@ handlers:
         class: {log_handler_class}
         filename: './logs/pubsub.log'
         mode: 'a'
-        maxBytes: 20000000
-        backupCount: 10
+        maxBytes: {server_log_max_size}
+        backupCount: {server_log_backup_count}
         encoding: 'utf8'
     pubsub_overflow:
         formatter: default
         class: {log_handler_class}
         filename: './logs/pubsub-overflow.log'
         mode: 'a'
-        maxBytes: 200000000
-        backupCount: 50
+        maxBytes: {server_log_max_size}
+        backupCount: {server_log_backup_count}
         encoding: 'utf8'
     pubsub_audit:
         formatter: default
         class: {log_handler_class}
         filename: './logs/pubsub-audit.log'
         mode: 'a'
-        maxBytes: 200000000
-        backupCount: 50
+        maxBytes: {server_log_max_size}
+        backupCount: {server_log_backup_count}
         encoding: 'utf8'
     rbac:
         formatter: default
@@ -212,8 +213,8 @@ handlers:
         class: {log_handler_class}
         filename: './logs/web_socket.log'
         mode: 'a'
-        maxBytes: 20000000
-        backupCount: 10
+        maxBytes: {server_log_max_size}
+        backupCount: {server_log_backup_count}
         encoding: 'utf8'
     ibm_mq:
         formatter: default
@@ -305,7 +306,23 @@ def get_logging_conf_contents() -> 'str':
     # Under Windows, we cannot have multiple processes access the same log file
     log_handler_class = linux_log_handler_class if is_linux else non_linux_log_handler_class
 
-    return logging_conf_contents.format(log_handler_class=log_handler_class)
+    # This can be overridden by users
+    if server_log_max_size := os.environ.get('Zato_Server_Log_Max_Size'):
+        server_log_max_size = int(server_log_max_size)
+    else:
+        server_log_max_size = 1000000000 # 1 GB by default
+
+    # This can be overridden by users
+    if server_log_backup_count := os.environ.get('Zato_Server_Log_Backup_Count'):
+        server_log_backup_count = int(server_log_backup_count)
+    else:
+        server_log_backup_count = 2
+
+    return logging_conf_contents.format(
+        log_handler_class=log_handler_class,
+        server_log_max_size=server_log_max_size,
+        server_log_backup_count=server_log_backup_count,
+    )
 
 # ################################################################################################################################
 # ################################################################################################################################

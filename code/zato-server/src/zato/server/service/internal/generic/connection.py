@@ -413,6 +413,9 @@ class ChangePassword(ChangePasswordBase):
 
     def _run_pre_handle_tasks_CLOUD_MICROSOFT_365(self, session:'any_', instance:'any_') -> 'None':
 
+        # Disabled, no longer in use
+        return
+
         # stdlib
         from json import dumps, loads
         from urllib.parse import parse_qs, urlsplit
@@ -433,7 +436,7 @@ class ChangePassword(ChangePasswordBase):
         opaque1 = loads(opaque1)
 
         client_id = opaque1['client_id']
-        secret_value = opaque1['secret_value']
+        secret_value = opaque1.get('secret_value') or opaque1.get('secret') or opaque1['password']
 
         credentials = (client_id, secret_value)
 

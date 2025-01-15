@@ -7,14 +7,6 @@ Copyright (C) 2022, Zato Source s.r.o. https://zato.io
 Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 """
 
-# ConcurrentLogHandler - updates stlidb's logging config on import so this needs to stay
-try:
-    import cloghandler # type: ignore
-except ImportError:
-    pass
-else:
-    cloghandler = cloghandler # For pyflakes
-
 # Zato
 from zato.common.typing_ import cast_
 
@@ -24,6 +16,7 @@ from zato.common.typing_ import cast_
 if 0:
     from argparse import ArgumentParser
     from zato.common.typing_ import any_, callnone, dictlist, strlist, tuple_
+    callnone = callnone
 
 # ################################################################################################################################
 # ################################################################################################################################
@@ -708,7 +701,7 @@ class CommandStore:
         #
         # start
         #
-        self.add_start_server_parser(parser, base_parser, subs, formatter_class)
+        _ = self.add_start_server_parser(parser, base_parser, subs, formatter_class)
 
         #
         # stop
@@ -774,9 +767,9 @@ def pre_process_quickstart(sys_argv:'strlist', opts_idx:'int') -> 'None':
     # .. remove them from their pre-3.2 non-optional positions,
     # .. note that we need to do it once for each of odb_type, redis_host and redis_port
     # .. using the same index because .pop will modify the list in place ..
-    sys_argv.pop(original_odb_type_idx)
-    sys_argv.pop(original_odb_type_idx)
-    sys_argv.pop(original_odb_type_idx)
+    _ = sys_argv.pop(original_odb_type_idx)
+    _ = sys_argv.pop(original_odb_type_idx)
+    _ = sys_argv.pop(original_odb_type_idx)
 
     # .. now, add the options back as '--' ones.
     sys_argv.append('--odb_type')
@@ -919,7 +912,7 @@ def main() -> 'any_':
         # Zato
         from zato.common.version import get_version
 
-        sys.stdout.write(get_version() + '\n')
+        _ = sys.stdout.write(get_version() + '\n')
         sys.exit(0)
 
     # Now, zato start ...
@@ -967,7 +960,7 @@ def main() -> 'any_':
                 missing_verb = ' is '    if len(missing) == 1 else ' are '
                 missing.sort()
 
-                sys.stdout.write(
+                _ = sys.stdout.write(
                     missing_noun                  + \
                     '`'                           + \
                     ', '.join(missing)            + \

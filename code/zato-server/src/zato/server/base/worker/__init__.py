@@ -60,7 +60,7 @@ from zato.server.base.worker.common import WorkerImpl
 from zato.server.connection.amqp_ import ConnectorAMQP
 from zato.server.connection.cache import CacheAPI
 from zato.server.connection.connector import ConnectorStore, connector_type
-from zato.server.connection.cloud.aws.s3 import S3Wrapper
+# from zato.server.connection.cloud.aws.s3 import S3Wrapper
 from zato.server.connection.email import IMAPAPI, IMAPConnStore, SMTPAPI, SMTPConnStore
 from zato.server.connection.ftp import FTPStore
 from zato.server.connection.http_soap.channel import RequestDispatcher, RequestHandler
@@ -705,9 +705,11 @@ class WorkerStore(_WorkerStoreBase):
     def init_cloud(self) -> 'None':
         """ Initializes all the cloud connections.
         """
-        data = (
-            ('cloud_aws_s3', S3Wrapper),
-        )
+        # data = (
+        #     ('cloud_aws_s3', S3Wrapper),
+        # )
+        data = []
+        S3Wrapper = None
 
         for config_key, wrapper in data:
             config_attr = getattr(self.worker_config, config_key)
@@ -1047,6 +1049,9 @@ class WorkerStore(_WorkerStoreBase):
     def init_pubsub(self) -> 'None':
         """ Sets up all pub/sub endpoints, subscriptions and topics. Also, configures pubsub with getters for each endpoint type.
         """
+        if not self.server.should_run_pubsub:
+            logger.info('Not starting publish/subscribe')
+            return
 
         # This is a pub/sub tool for delivery of Zato services within this server
         service_pubsub_tool = PubSubTool(self.pubsub, self.server, PUBSUB.ENDPOINT_TYPE.SERVICE.id, True)
@@ -2377,6 +2382,7 @@ class WorkerStore(_WorkerStoreBase):
     def on_broker_msg_CLOUD_AWS_S3_CREATE_EDIT(self, msg:'bunch_', *args:'any_') -> 'None':
         """ Creates or updates an AWS S3 connection.
         """
+        S3Wrapper = None
         msg.password = self.server.decrypt(msg.password)
 
         self._update_aws_config(msg)

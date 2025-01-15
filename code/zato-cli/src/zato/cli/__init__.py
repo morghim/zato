@@ -348,7 +348,7 @@ class ZatoCommand:
 
 # ################################################################################################################################
 
-    def get_arg(self, name, default='') -> 'any_':
+    def get_arg(self, name:'str', default:'any_'='') -> 'any_':
         if hasattr(self.args, 'get'):
             return self.args.get(name) or default
         else:
@@ -430,7 +430,7 @@ class ZatoCommand:
         # stdlib
         import logging
         import sys
-        from imp import reload
+        from importlib import reload
 
         # Zato
         from zato.common.util.file_system import fs_safe_now
@@ -1041,7 +1041,8 @@ class ManageCommand(ZatoCommand):
             sys.exit(self.SYS_ERROR.NOT_A_ZATO_COMPONENT) # noqa
 
         found = list(found)[0]
-        json_data = load(open_r(os.path.join(self.component_dir, found)))
+        with open_r(os.path.join(self.component_dir, found)) as f:
+            json_data = load(f)
 
         os.chdir(self.component_dir)
 

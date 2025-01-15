@@ -34,6 +34,9 @@ from zato.common.util.json_ import json_loads
 
 if 0:
     from zato.common.typing_ import any_, anydict, byteslist, callable_, callnone, intnone, strdict, strnone, type_
+    callnone = callnone
+    intnone = intnone
+    strnone = strnone
 
 # ################################################################################################################################
 # ################################################################################################################################
@@ -99,7 +102,7 @@ class AuxServerConfig:
 
         odb.pool = sql_pool_store[ZATO_ODB_POOL_NAME].pool
         odb.init_session(ZATO_ODB_POOL_NAME, config.main.odb, odb.pool, False)
-        odb.pool.ping(odb.fs_sql_config)
+        _ = odb.pool.ping(odb.fs_sql_config)
 
         return odb
 
@@ -314,7 +317,7 @@ class AuxServer:
 # ################################################################################################################################
 
     @classmethod
-    def start(
+    def start_from_repo_location(
         class_,                # type: type_[AuxServer]
         *,
         base_dir=None,         # type: strnone
@@ -373,6 +376,18 @@ class AuxServer:
         class_.after_config_hook(config, repo_location)
 
         # Run the server now
+        class_._start(config)
+
+# ################################################################################################################################
+
+    @classmethod
+    def start_from_config(class_:'type_[AuxServer]', config:'AuxServerConfig') -> 'None':
+        class_._start(config)
+
+# ################################################################################################################################
+
+    @classmethod
+    def _start(class_:'type_[AuxServer]', config:'AuxServerConfig') -> 'None':
         try:
             class_(config).serve_forever()
         except Exception:

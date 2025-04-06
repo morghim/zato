@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Copyright (C) 2023, Zato Source s.r.o. https://zato.io
+Copyright (C) 2025, Zato Source s.r.o. https://zato.io
 
 Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 """
@@ -54,6 +54,7 @@ from zato.common.odb.api import PoolStore
 from zato.common.odb.post_process import ODBPostProcess
 from zato.common.pubsub import SkipDelivery
 from zato.common.rate_limiting import RateLimiting
+from zato.common.rules.api import RulesManager
 from zato.common.typing_ import cast_, intnone, optional
 from zato.common.util.api import absolutize, as_bool, get_config_from_file, get_kvdb_config_for_log, get_user_config_name, \
     fs_safe_name, hot_deploy, invoke_startup_services as _invoke_startup_services, make_list_from_string_list, new_cid, \
@@ -131,6 +132,11 @@ megabyte = 10 ** 6
 # ################################################################################################################################
 
 _ipc_timeout = IPC.Default.Timeout
+
+# ################################################################################################################################
+# ################################################################################################################################
+
+_needs_details = as_bool(os.environ.get('Zato_Needs_Details', False))
 
 # ################################################################################################################################
 # ################################################################################################################################
@@ -319,6 +325,9 @@ class ParallelServer(BrokerMessageReceiver, ConfigLoader, HTTPHandler):
 
         # A wrapper for outgoing WSX connections
         self.wsx_connection_pool_wrapper = ConnectionPoolWrapper(self, GENERIC.CONNECTION.TYPE.OUTCONN_WSX)
+
+        # Rule engine
+        self.rules = RulesManager()
 
         # The main config store
         self.config = ConfigStore()
@@ -806,6 +815,12 @@ class ParallelServer(BrokerMessageReceiver, ConfigLoader, HTTPHandler):
         # Append additional services that can be invoked through WebSocket gateways.
         self.add_wsx_gateway_service_allowed()
 
+        if _needs_details:
+            logger.info('*' * 60)
+            logger.info('Checking pickup self.base_dir `%s`', self.base_dir)
+            logger.info('Checking pickup self.pickup_config `%s`', self.pickup_config)
+            logger.info('Checking pickup Source_Directory `%s`', HotDeploy.Source_Directory)
+
         # Service sources from user-defined hot-deployment configuration ..
         for pickup_from in extract_pickup_from_items(self.base_dir, self.pickup_config, HotDeploy.Source_Directory):
 
@@ -837,29 +852,40 @@ class ParallelServer(BrokerMessageReceiver, ConfigLoader, HTTPHandler):
         # We assume that it will be always one of these file name suffixes,
         # note that we are not reading enmasse (.yaml and .yml) files here,
         # even though directories with enmasse files may be among what we have in self.user_conf_location_extra.
-        suffixes_supported = ('.ini', '.conf')
+        suffixes_supported = ('.ini', '.conf', '.zrules')
 
         # User-config from ./config/repo/user-config
         for file_name in os.listdir(dir_name):
+
+            # Reusable
+            file_name = file_name.lower()
 
             # Reject files that actually contain environment variables
             if file_name == EnvFile.Default:
                 continue
 
             # Reject files with suffixes that we do not recognize
-            if not file_name.lower().endswith(suffixes_supported):
+            if not file_name.endswith(suffixes_supported):
                 continue
 
-            user_conf_full_path = os.path.join(dir_name, file_name)
-            user_config_name = get_user_config_name(file_name)
-            conf = get_config_from_file(user_conf_full_path, file_name)
+            # Load rules ..
+            if file_name.endswith('.zrules'):
+                _ = self.rules.load_rules_from_file(os.path.join(dir_name, file_name))
+                logger.info('Read rules from `%s` (dir:%s)', file_name, dir_name)
 
-            # Not used at all in this type of configuration
-            _:'any_' = conf.pop('user_config_items', None)
+            # .. load a config file ..
+            else:
 
-            self.user_config[user_config_name] = conf
+                user_conf_full_path = os.path.join(dir_name, file_name)
+                user_config_name = get_user_config_name(file_name)
+                conf = get_config_from_file(user_conf_full_path, file_name)
 
-            logger.info('Read user config `%s` from `%s` (dir:%s)', user_config_name, file_name, dir_name)
+                # Not used at all in this type of configuration
+                _:'any_' = conf.pop('user_config_items', None)
+
+                self.user_config[user_config_name] = conf
+
+                logger.info('Read user config `%s` from `%s` (dir:%s)', user_config_name, file_name, dir_name)
 
 # ################################################################################################################################
 
@@ -946,7 +972,7 @@ class ParallelServer(BrokerMessageReceiver, ConfigLoader, HTTPHandler):
             if asbool(log_details):
 
                 # .. now, we need to have the correct file available ..
-                path = ['~', 'env', 'details', 'all-zato-env-details.json']
+                path = ['~', 'env', 'details', 'all-zato-env-details.txt']
                 path = os.path.join(*path)
                 path = os.path.expanduser(path)
 
@@ -1245,16 +1271,6 @@ class ParallelServer(BrokerMessageReceiver, ConfigLoader, HTTPHandler):
         # Per-process IPC tasks
         self.init_ipc()
 
-        if is_posix:
-            connector_config_ipc = cast_('ConnectorConfigIPC', self.connector_config_ipc)
-
-            if self.component_enabled['stats']:
-
-                # Statistics
-                events_config = cast_('anydict', connector_config_ipc.get_config(ZatoEventsIPC.ipc_config_name, as_dict=True))
-                events_tcp_port = events_config['port']
-                self._run_stats_client(events_tcp_port)
-
         # Invoke startup callables
         self.startup_callable_tool.invoke(SERVER_STARTUP.PHASE.AFTER_STARTED, kwargs={
             'server': self,
@@ -1429,12 +1445,6 @@ class ParallelServer(BrokerMessageReceiver, ConfigLoader, HTTPHandler):
             fs_data_path = os.path.join(self.work_dir, fs_data_path, self.events_dir, 'zato.events')
             fs_data_path = os.path.abspath(fs_data_path)
             fs_data_path = os.path.normpath(fs_data_path)
-
-        extra_options_kwargs = {
-            'fs_data_path': fs_data_path,
-            'sync_threshold': EventsDefault.sync_threshold,
-            'sync_interval': EventsDefault.sync_interval,
-        }
 
 # ################################################################################################################################
 

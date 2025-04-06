@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 
 """
-Copyright (C) 2024, Zato Source s.r.o. https://zato.io
+Copyright (C) 2025, Zato Source s.r.o. https://zato.io
 
 Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 """
 
 # stdlib
 import logging
+import os
 from datetime import datetime
 from gzip import GzipFile
 from hashlib import sha256
@@ -30,6 +31,7 @@ from zato.common.json_schema import DictError as JSONSchemaDictError, Validation
 from zato.common.marshal_.api import Model, ModelValidationError
 from zato.common.rate_limiting.common import AddressNotAllowed, BaseException as RateLimitingException, RateLimitReached
 from zato.common.typing_ import cast_
+from zato.common.util.api import as_bool
 from zato.common.util.auth import enrich_with_sec_data, extract_basic_auth
 from zato.common.util.exception import pretty_format_exception
 from zato.common.util.http_ import get_form_data as util_get_form_data, QueryDict
@@ -59,6 +61,10 @@ logger = logging.getLogger('zato_rest')
 _logger_is_enabled_for = logger.isEnabledFor
 _logging_info = logging.INFO
 split_re = regex_compile('........?').findall # type: ignore
+
+# ################################################################################################################################
+
+_needs_details = as_bool(os.environ.get('Zato_Needs_Details', False))
 
 # ################################################################################################################################
 
@@ -225,7 +231,8 @@ class RequestDispatcher:
         wsgi_environ:'stranydict',
         worker_store:'WorkerStore',
         user_agent:'str',
-        remote_addr:'str'
+        remote_addr:'str',
+        _needs_details=_needs_details,
     ) -> 'any_':
 
         # Reusable
@@ -324,6 +331,18 @@ class RequestDispatcher:
                 # This will check credentials based on a security definition attached to the channel
                 #
                 if sec.sec_def != ZATO_NONE or sec.sec_use_rbac is True:
+
+                    if _needs_details:
+                        logger.info('*' * 60)
+
+                        logger.info('Channel item: `%s`', channel_item)
+                        logger.info('Path info: `%s`', path_info)
+
+                        logger.info('Payload: `%s`', payload)
+                        logger.info('POST data: `%s`', post_data)
+
+                        for key, value in sorted(wsgi_environ.items()):
+                            logger.info('WSGI key=`%s` value=`%s`', key, value)
 
                     # Do check credentials based on a security definition
                     auth_result = self.url_data.check_security(
@@ -895,7 +914,19 @@ class RequestHandler:
                             if hasattr(response.payload, 'getvalue'):
                                 value = response.payload.getvalue() # type: ignore
                             else:
-                                value = dumps(response.payload)
+                                # Check if it's a list of models ..
+                                is_model_list = isinstance(response.payload, list) and isinstance(response.payload[0], Model)
+
+                                # .. if it is one, we need to turn each of the models into a dict ..
+                                if is_model_list:
+                                    value = []
+                                    for item in response.payload:
+                                        value.append(item.to_dict())
+                                    value = dumps(value)
+
+                                # .. it's not a list of models.
+                                else:
+                                    value = dumps(response.payload)
                     else:
                         value = ''
                     response.payload = value

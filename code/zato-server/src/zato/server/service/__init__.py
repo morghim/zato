@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Copyright (C) 2024, Zato Source s.r.o. https://zato.io
+Copyright (C) 2025, Zato Source s.r.o. https://zato.io
 
 Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 """
@@ -9,9 +9,10 @@ Licensed under AGPLv3, see LICENSE.txt for terms and conditions.
 # stdlib
 import logging
 from datetime import datetime, timedelta
-from http.client import BAD_REQUEST, METHOD_NOT_ALLOWED
+from http.client import BAD_REQUEST, METHOD_NOT_ALLOWED, OK
 from inspect import isclass
 from json import loads
+from re import findall
 from traceback import format_exc
 
 # Bunch
@@ -31,7 +32,7 @@ from zato.common.py23_ import maxint
 # Zato
 from zato.bunch import Bunch
 from zato.common.api import BROKER, CHANNEL, DATA_FORMAT, HL7, KVDB, NO_DEFAULT_VALUE, NotGiven, PARAMS_PRIORITY, PUBSUB, \
-     WEB_SOCKET, zato_no_op_marker
+     RESTAdapterResponse, WEB_SOCKET, zato_no_op_marker
 from zato.common.broker_message import CHANNEL as BROKER_MSG_CHANNEL
 from zato.common.exception import Inactive, Reportable, ZatoException
 from zato.common.facade import SecurityFacade
@@ -96,6 +97,7 @@ if 0:
     from zato.common.json_schema import Validator as JSONSchemaValidator
     from zato.common.kvdb.api import KVDB as KVDBAPI
     from zato.common.odb.api import ODBManager
+    from zato.common.rules.api import RulesManager
     from zato.common.typing_ import any_, anydict, anydictnone, boolnone, callable_, callnone, dictnone, intnone, \
         listnone, modelnone, strdict, strdictnone, strstrdict, strnone, strlist
     from zato.common.util.time_ import TimeUtil
@@ -473,6 +475,9 @@ class Service:
 
     # Processing time in milliseconds
     processing_time: 'float'
+
+    # Rule engine
+    rules: 'RulesManager'
 
     component_enabled_sms: 'bool'
     component_enabled_hl7: 'bool'
@@ -1514,7 +1519,6 @@ class RESTAdapter(Service):
     log_response     = False
     map_response     = None
     get_conn_name    = None
-    get_auth         = None
     get_auth_scopes  = None
     get_path_params  = None
     get_method       = None
@@ -1523,6 +1527,12 @@ class RESTAdapter(Service):
     get_query_string = None
     get_auth_bearer  = None
     get_sec_def_name = None
+    needs_raw_response = False
+
+    max_retries        = 0
+    retry_sleep_time   = 2
+    retry_backoff_threshold = 3
+    retry_backoff_multiplier = 2
 
     has_query_string_id   = False
     query_string_id_param = None
@@ -1539,7 +1549,7 @@ class RESTAdapter(Service):
         self,
         conn_name,     # type: str
         *,
-        data='',       # type: str
+        data='',       # type: ignore
         model=None,    # type: modelnone
         callback=None, # type: callnone
         params=None,   # type: strdictnone
@@ -1549,12 +1559,15 @@ class RESTAdapter(Service):
         auth_scopes=None,  # type: any_
         log_response=True, # type: bool
     ):
+        # Type checks
+        data:'any_'
+        raw_response:'any_'
 
         # Get the actual REST connection ..
         conn:'RESTWrapper' = self.out.rest[conn_name].conn
 
         # .. invoke the system and map its response back through the callback callable ..
-        out:'any_' = conn.rest_call(
+        response = conn.rest_call(
             cid=self.cid,
             data=data,
             model=model, # type: ignore
@@ -1565,10 +1578,19 @@ class RESTAdapter(Service):
             sec_def_name=sec_def_name,
             auth_scopes=auth_scopes,
             log_response=log_response,
+            max_retries=self.max_retries,
+            retry_sleep_time=self.retry_sleep_time,
+            retry_backoff_threshold=self.retry_backoff_threshold,
         )
 
-        # .. and return the result to our caller.
-        return out
+        if response is not None:
+            data, raw_response = response
+
+            # .. and return the result to our caller, optionally returning the raw response as well ..
+            if self.needs_raw_response:
+                return RESTAdapterResponse(data, raw_response)
+            else:
+                return data
 
 # ################################################################################################################################
 
@@ -1671,6 +1693,184 @@ class RESTAdapter(Service):
 
         # .. and return it to our caller.
         self.response.payload = out
+
+# ################################################################################################################################
+# ################################################################################################################################
+
+class BusinessCentralAdapter(Service):
+
+    model     = None
+    conn_name = cast_('str', None)
+    base_url  = cast_('str', None)
+    endpoint  = cast_('str', None)
+
+# ################################################################################################################################
+
+    def _find_placeholders(self, text:'str', pattern:'str'=r'\{([^{}]+)\}') -> 'strlist':
+        matches = findall(pattern, text)
+        return matches
+
+# ################################################################################################################################
+
+    def _replace_placeholders_by_input(self, text:'str', placeholders:'strlist') -> 'str':
+
+        # Local variables
+        found = {}
+
+        # We go here if we don't have any input at all
+        if not self.request.raw_request:
+            missing = placeholders
+        else:
+
+            missing = []
+
+            for item in placeholders:
+                if item in self.request.raw_request:
+                    value = self.request.raw_request[item]
+                    value = str(value)
+                    found[item] = value
+                else:
+                    missing.append(item)
+
+        # Report any missing input elements
+        if missing:
+            suffix = 's ' if len(missing) > 1 else ' '
+            raise Exception(f'Element{suffix}missing on input -> `{sorted(missing)}` ')
+
+        for name, value in found.items():
+            pattern = '{' + name + '}'
+            text = text.replace(pattern, value)
+
+        return text
+# ################################################################################################################################
+
+    def _replace_placeholders_by_file(self, text:'str', placeholder:'str') -> 'str':
+
+        # Extrac the config file's name ..
+        file_name, path = placeholder.split(':')
+        file_base = file_name.split('.')[0]
+
+        # .. and the path in that file leading to our value ..
+        path = path.split('.')
+
+        # .. get the actual config file now ..
+        config = self.config[file_base]
+
+        # .. we're going to traverse that element ..
+        value = config
+
+        # .. keep traversing until we've run out of the path elements ..
+        while path:
+            elem = path.pop(0)
+            try:
+                value = value[elem]
+            except KeyError:
+                raise Exception(f'Key not found -> `{placeholder}` -> `{elem}` in `{sorted(value)}`')
+
+        # .. finally, we can return our value to the caller.
+        return value
+
+# ################################################################################################################################
+
+    def _replace_placeholders(self, text:'str') -> 'str':
+
+        # Find all the placeholders to replace ..
+        placeholders = self._find_placeholders(text)
+
+        # .. if there are none, we can return early ..
+        if not placeholders:
+            return text
+
+        # .. we go here if we need to wait a value in a config file ..
+        if ':' in text:
+            return self._replace_placeholders_by_file(text, placeholders[0])
+
+        # .. or we go here if we need to wait a value or values on input.
+        else:
+            return self._replace_placeholders_by_input(text, placeholders)
+
+# ################################################################################################################################
+
+    def get_model(self) -> 'any_':
+        # Don't return anything by default because models are optional
+        pass
+
+# ################################################################################################################################
+
+    def get_conn_name(self) -> 'str':
+        raise NotImplementedError('Must be implemented by subclasses')
+
+# ################################################################################################################################
+
+    def get_base_url(self) -> 'str':
+        raise NotImplementedError('Must be implemented by subclasses')
+
+# ################################################################################################################################
+
+    def _invoke_business_central(self, endpoint:'str', base_url:'str | None') -> 'anydictnone':
+
+        # Get our configurarion
+        model = self.model or self.get_model()
+        conn_name = self.conn_name or self.get_conn_name()
+        base_url = base_url or self.get_base_url()
+
+        # Build a full address ..
+        address_full = f'{base_url}/{endpoint}'
+
+        # .. get the connection ..
+        conn = self.cloud.ms365.get(conn_name).conn # type: ignore
+
+        # .. obtain a new client ..
+        with conn.client() as client:
+
+            # .. make sure our access token is fresh ..
+            client.refresh()
+
+            # .. make the request ..
+            response = client.impl.connection.get(address_full)
+
+            # .. do we have a 200 OK ..
+            if response.status_code == OK:
+
+                # .. if yes, we can extract our response ..
+                data = response.json()
+
+                # .. if we have a model ..
+                if model:
+
+                    # .. is the response a list of values ..
+                    list_value = data.get('value', NOT_GIVEN)
+
+                    # .. try to extract all the objects if we actually have a list ..
+                    if isinstance(list_value, list):
+                        _model_data = []
+                        for item in list_value:
+                            _model = model.from_dict(item)
+                            _model_data.append(_model)
+
+                    # .. or we can map the response as is ..
+                    else:
+                        _model_data = model.from_dict(data)
+
+                    # .. map the result to the object we're returning ..
+                    data = _model_data
+
+                # .. now, we can return the result to the caller.
+                return data
+
+            # .. otherwise, raise an exception.
+            else:
+                msg = f'Endpoint invocation error ({response.status_code}) -> {response.text}'
+                raise Exception(msg)
+
+# ################################################################################################################################
+
+    def handle(self):
+
+        endpoint = self._replace_placeholders(self.endpoint)
+        base_url = self._replace_placeholders(self.base_url)
+
+        self.response.payload = self._invoke_business_central(endpoint, base_url)
 
 # ################################################################################################################################
 # ################################################################################################################################

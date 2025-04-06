@@ -238,6 +238,10 @@ class BaseHTTPSOAPWrapper:
     ) -> '_RequestsResponse':
 
         # Local variables
+        max_retries = kwargs.get('max_retries', 0)
+        retry_sleep_time = kwargs.get('retry_sleep_time', 2)
+        retry_backoff_threshold = kwargs.get('retry_backoff_threshold', 3)
+        retry_backoff_multiplier = kwargs.get('retry_backoff_multiplier', 2)
         params = kwargs.get('params')
         json = kwargs.pop('json', None)
         cert = self.config['tls_key_cert_full_path'] if self.sec_type == _TLS_Key_Cert else None
@@ -719,9 +723,13 @@ class HTTPSOAPWrapper(BaseHTTPSOAPWrapper):
         params=None,  # type: strdictnone
         headers=None, # type: strdictnone
         method='',    # type: str
-        sec_def_name=None, # type: any_
-        auth_scopes=None,  # type: any_
-        log_response=True, # type: bool
+        sec_def_name=None,    # type: any_
+        auth_scopes=None,     # type: any_
+        log_response=True,    # type: bool
+        needs_exception=True, # type: bool
+        max_retries=0,        # type: int
+        retry_sleep_time=2,   # type: int
+        retry_backoff_threshold=3, # type: int
     ) -> 'any_':
 
         # Invoke the system ..
@@ -734,9 +742,15 @@ class HTTPSOAPWrapper(BaseHTTPSOAPWrapper):
                 auth_scopes=auth_scopes,
                 params=params,
                 headers=headers,
+                max_retries=max_retries,
+                retry_sleep_time=retry_sleep_time,
+                retry_backoff_threshold=retry_backoff_threshold,
             )
         except Exception as e:
-            logger.warn('Caught an exception -> %s -> %s', e, format_exc())
+            if needs_exception:
+                raise
+            else:
+                logger.warn('Caught an exception -> %s -> %s', e, format_exc())
         else:
 
             # .. optionally, log what we received ..
@@ -781,7 +795,7 @@ class HTTPSOAPWrapper(BaseHTTPSOAPWrapper):
                 data = callback(data, cid=cid, id=id, model=model, callback=callback)
 
             # .. and return the data to our caller ..
-            return data
+            return data, response
 
 RESTWrapper = HTTPSOAPWrapper
 
